@@ -1,0 +1,9 @@
+Manifest.toml
+.work/
+reference/
+results/
+*.cov
+*.mem
+*.log
+.DS_Store
+Thumbs.db
