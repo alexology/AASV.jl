@@ -1,40 +1,40 @@
-# Misure locali del 14 ottobre 2026
+# Local measurements, 14 October 2026
 
-Windows, Julia 1.12.2 e R 4.5.0, sullo stesso computer. DECIPHER con
-`processors=1`; nessuna esecuzione contemporanea dei due benchmark.
-Mediana di tre chiamate successive alla prima, in secondi:
+Windows, Julia 1.12.2 and R 4.5.0, on the same computer. DECIPHER with
+`processors=1`; the two benchmarks were never run at the same time.
+Median of the three calls following the first one, in seconds:
 
-| Operazione | R | Julia |
+| Operation | R | Julia |
 |---|---:|---:|
-| Allineamento di 20 proteine × 150 aa | 0.280 | 0.089 |
-| Allineamento di 80 proteine × 150 aa | 1.000 | 0.527 |
-| Analisi funzionale + classificazione di 10 ASV su tre livelli | 11.600 | 0.284 |
+| Alignment of 20 proteins × 150 aa | 0.280 | 0.089 |
+| Alignment of 80 proteins × 150 aa | 1.000 | 0.527 |
+| Functional analysis + classification of 10 ASVs at three levels | 11.600 | 0.284 |
 
-La pipeline usa 20 riferimenti già allineati e ASV di 390 nt. Include
-input/output FASTA ed Excel; esclude BOLD e VSEARCH. Su questi input,
-FI e classi coincidono per tutte le 30 combinazioni ASV/livello.
+The pipeline uses 20 pre-aligned references and 390 nt ASVs. It includes
+FASTA and Excel input/output; it excludes BOLD and VSEARCH. On these inputs,
+FI and classes match for all 30 ASV/level combinations.
 
-Prima chiamata della pipeline, esclusi avvio del processo e importazione dei
-pacchetti: Julia 13.838 s, R 12.660 s. La compilazione iniziale Julia pesa
-quindi molto rispetto alle chiamate successive.
+First pipeline call, excluding process start-up and package import:
+Julia 13.838 s, R 12.660 s. Julia's initial compilation therefore weighs
+heavily compared with the subsequent calls.
 
-Su questi input, il motore Julia è circa 3,1 volte più veloce con 20 proteine
-e 1,9 volte con 80; la pipeline funzionale e di classificazione è anch'essa
-più veloce a regime. Questi dati non stabiliscono quale intero workflow su un
-dataset reale sia più veloce: i motori di allineamento sono differenti e i
-dati qui sono sintetici.
+On these inputs, the Julia engine is about 3.1 times faster with 20 proteins
+and 1.9 times faster with 80; the functional and classification pipeline is
+also faster in steady state. These data do not establish which complete
+workflow is faster on a real dataset: the alignment engines differ and the
+data here are synthetic.
 
-Il profiling della versione precedente attribuiva quasi tutto il tempo del
-caso da 80 sequenze al raffinamento: 32,66 s su circa 33,9 s. Il punteggio ora
-scorre direttamente le stringhe ASCII e il raffinamento valuta soltanto le
-coppie attraversate da ciascuna bipartizione, mantenendo in cache le altre.
-La mediana a 80 sequenze è scesa da 33,913 s a 0,527 s. La selezione UPGMA usa
-inoltre una coda minima delle distanze, con costo O(N² log N) anziché O(N³).
+Profiling of the previous version attributed almost all the time of the
+80-sequence case to refinement: 32.66 s out of about 33.9 s. Scoring now walks
+the ASCII strings directly, and refinement evaluates only the pairs crossed by
+each bipartition, caching the others. The 80-sequence median dropped from
+33.913 s to 0.527 s. UPGMA selection also uses a min-queue of distances, with
+cost O(N² log N) instead of O(N³).
 
-Il codice R originale si interrompe su una query priva di gap iniziali;
-la pipeline è misurata su frammenti più corti dei riferimenti per evitare
-quel caso senza modificare il sorgente originale. Vedere README.md.
+The original R code fails on a query without leading gaps; the pipeline is
+measured on fragments shorter than the references to avoid that case without
+modifying the original source. See README.md.
 
-Script riproducibili: `compare.jl`, `compare.R`, `summarize.jl`.
-Misure grezze: `../results/benchmark/julia_times.csv`, `r_times.csv` e
-`summary.csv` nella stessa cartella risultati.
+Reproducible scripts: `compare.jl`, `compare.R`, `summarize.jl`.
+Raw measurements: `../results/benchmark/julia_times.csv`, `r_times.csv` and
+`summary.csv` in the same results directory.

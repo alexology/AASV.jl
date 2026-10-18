@@ -1,58 +1,58 @@
-# Confronto locale R / Julia
+# Local R / Julia comparison
 
-Per confrontare il solo calcolo delle distanze del filtro divergente con
-l'implementazione precedente:
+To compare only the distance computation of the divergent filter with the
+previous implementation:
 
 ```powershell
 julia --project=. benchmark/divergent_filter.jl
 ```
 
-Il benchmark verifica prima l'uguaglianza delle distanze, poi misura una chiamata
-dopo il riscaldamento, riportando tempo e byte allocati. Include 400 sequenze
-tutte diverse e 1.000 sequenze con 50 sequenze distinte, lunghe 220 posizioni.
-Sono dati sintetici: le misure escludono lettura/scrittura FASTA, checkpoint e
-report e non rappresentano il tempo dell'intera pipeline.
-Le misure locali sono in `benchmark/DIVERGENT_FILTER_RESULTS.md`.
+The benchmark first checks that the distances are equal, then times one call
+after warm-up, reporting time and allocated bytes. It includes 400 sequences
+that are all different and 1,000 sequences with 50 distinct sequences, each 220
+positions long. The data are synthetic: the measurements exclude FASTA
+reading/writing, checkpoints and reports, and do not represent the time of the
+whole pipeline.
+The local measurements are in `benchmark/DIVERGENT_FILTER_RESULTS.md`.
 
-Eseguire in sequenza, evitando altri carichi sulla CPU:
+Run sequentially, avoiding other CPU load:
 
 ```powershell
 julia --project=. benchmark/compare.jl
 & 'C:\Program Files\R\R-4.5.0\bin\Rscript.exe' benchmark/compare.R results/benchmark reference/aasv
 ```
 
-Il primo script crea fixture identiche per entrambi i linguaggi sotto
-`results/benchmark` e misura Julia; il secondo legge le fixture e misura il
-codice R originale al commit indicato nel README del progetto.
+The first script creates identical fixtures for both languages under
+`results/benchmark` and times Julia; the second reads the fixtures and times
+the original R code at the commit given in the project README.
 
-Scenari: allineamento multiplo di 20 e 80 proteine sintetiche di 150 residui,
-e analisi funzionale + classificazione di 10 ASV (390 nt) con 20 riferimenti
-su specie, genere e famiglia. I profili della pipeline sono già allineati e
-identici per entrambe le versioni; il tempo della pipeline include FASTA/Excel.
-Non include download BOLD o VSEARCH.
+Scenarios: multiple alignment of 20 and 80 synthetic proteins of 150 residues,
+and functional analysis + classification of 10 ASVs (390 nt) against 20
+references at species, genus and family level. The pipeline profiles are
+already aligned and identical for both versions; the pipeline time includes
+FASTA/Excel I/O. It does not include BOLD downloads or VSEARCH.
 
-Le ASV sono frammenti delle posizioni 13–142 delle proteine di riferimento,
-che hanno 150 residui. Nel sorgente R originale, una query con zero gap
-iniziali provoca un errore nel sottoinsieme `audit_results[-seq_len(0)]`;
-il confronto della pipeline usa frammenti per evitare quel caso senza
-modificare il codice R. I risultati non rappresentano quindi tutte le
-possibili query. `--pipeline-only` permette di ripetere la pipeline conservando
-le misure degli allineamenti, sia nello script Julia che come terzo argomento
-dello script R.
+The ASVs are fragments covering positions 13–142 of the reference proteins,
+which have 150 residues. In the original R source, a query with zero leading
+gaps causes an error in the subset `audit_results[-seq_len(0)]`; the pipeline
+comparison uses fragments to avoid that case without modifying the R code.
+The results therefore do not represent all possible queries.
+`--pipeline-only` repeats the pipeline while keeping the alignment
+measurements, both in the Julia script and as the third argument of the
+R script.
 
-Ogni scenario contiene la prima chiamata e tre chiamate successive; riportare
-la mediana delle tre chiamate successive. La prima chiamata Julia include
-eventuale compilazione delle funzioni, ma **non** l'avvio del processo o il
-caricamento dei pacchetti, che avvengono prima della misura.
+Each scenario contains the first call and three subsequent calls; report the
+median of the three subsequent calls. The first Julia call includes any
+function compilation, but **not** process start-up or package loading, which
+happen before the measurement.
 
-Il comando sopra avvia Julia con un solo thread, quindi DECIPHER usa
-`processors=1` e ProfileAlignments usa un solo thread. Per misurare anche la
-modalità parallela Julia, eseguire separatamente
-`julia -t auto --project=. benchmark/compare.jl`. Si
-confrontano le impostazioni normali dei due motori, che usano algoritmi,
-pesi e parametri differenti. I tempi misurano queste implementazioni su
-questi input, non le prestazioni intrinseche di R contro Julia. Non sono
-benchmark di accuratezza biologica.
+The command above starts Julia with a single thread, so DECIPHER uses
+`processors=1` and ProfileAlignments uses one thread. To also measure Julia's
+parallel mode, run `julia -t auto --project=. benchmark/compare.jl`
+separately. The comparison uses the normal settings of the two engines, which
+use different algorithms, weights and parameters. The timings measure these
+implementations on these inputs, not the intrinsic performance of R versus
+Julia. They are not benchmarks of biological accuracy.
 
-Risultati grezzi: `results/benchmark/julia_times.csv` e `r_times.csv`.
-Il riepilogo dell'ultima misura locale è in `benchmark/RESULTS.md`.
+Raw results: `results/benchmark/julia_times.csv` and `r_times.csv`.
+The summary of the latest local run is in `benchmark/RESULTS.md`.

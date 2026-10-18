@@ -1,11 +1,11 @@
 # AASV.jl
 
-Implementazione Julia della pipeline [aasv](https://github.com/alexology/aasv)
-per l'analisi funzionale delle ASV COI. Le formule scientifiche sono compatibili
-con la versione R 0.1.0, commit `9960347948da3142714deb656fcf38124b4e38d8`;
-l'architettura usa tipi, dispatch e convenzioni Julia.
+Julia implementation of the [aasv](https://github.com/alexology/aasv) pipeline
+for the functional analysis of COI ASVs. The scientific formulas are compatible
+with R version 0.1.0, commit `9960347948da3142714deb656fcf38124b4e38d8`;
+the architecture uses Julia types, dispatch and conventions.
 
-Richiede Julia 1.10 o successiva. Non richiede R, Biostrings o DECIPHER.
+Requires Julia 1.10 or later. Does not require R, Biostrings or DECIPHER.
 
 ```powershell
 julia --project=. setup.jl
@@ -13,10 +13,11 @@ julia -t auto --project=. test/runtests.jl
 julia -t auto --project=. examples/offline_pipeline.jl
 ```
 
-L'esempio locale crea FASTA, tabelle dei codoni, report Excel e
+The local example creates FASTA files, codon tables, Excel reports and
 `results/demo/analysis/classification.csv`.
 
-Per installare la versione pubblicata su GitHub:
+To install the version published on GitHub (ProfileAlignments.jl is not
+registered, so add it first; `setup.jl` does the same for a local checkout):
 
 ```julia
 using Pkg
@@ -28,13 +29,13 @@ record = Sequence("COI", dna"ATGCCAGCA")
 protein = best_translation(record.sequence)
 ```
 
-## Pipeline con dati reali
+## Pipeline with real data
 
 ```julia
 using AASV, DataFrames, CSV
 
 taxonomy = CSV.read("taxonomy.csv", DataFrame)
-# Colonne obbligatorie: family, genus, species.
+# Required columns: family, genus, species.
 align_species_seq!(taxonomy; alignment_dir="references",
                    min_length=500, max_length=1000, genetic_code="5")
 
@@ -50,26 +51,26 @@ align_genus_seq!(; alignment_dir="references")
 align_family_seq!(; alignment_dir="references")
 
 asvs = CSV.read("asvs.csv", DataFrame)
-# Colonne obbligatorie: family, genus, species, ASV (sequenza DNA).
-# Colonne numeriche aggiuntive: abbondanze nei campioni.
+# Required columns: family, genus, species, ASV (DNA sequence).
+# Additional numeric columns: abundances in the samples.
 revised = asv_functional_structure!(asvs;
     alignment_dir="references", output_dir="analysis", genetic_code="5")
 verdicts = classify_asv("analysis")
 CSV.write("classification.csv", verdicts)
 ```
 
-Le opzioni Julia si passano dopo `;`. I valori statistici mancanti usano
-`missing`; l'assenza di un risultato o di un'opzione usa `nothing`. CSV, Excel
-e `DataFrame` sono adattatori di ingresso/uscita, mentre il nucleo usa strutture
-concrete. Le sequenze sono vettori di `Sequence(id, sequence)`, con nomi univoci.
-Gli argomenti `alignment_dir` e `output_dir` accettano percorsi Windows, Linux
-e macOS. Usare `overwrite=true` per ricostruire i riferimenti già presenti.
+Julia options are passed after `;`. Missing statistical values use `missing`;
+an absent result or option uses `nothing`. CSV, Excel and `DataFrame` are
+input/output adapters, while the core uses concrete structures. Sequences are
+vectors of `Sequence(id, sequence)` with unique names. The `alignment_dir` and
+`output_dir` arguments accept Windows, Linux and macOS paths. Use
+`overwrite=true` to rebuild references that already exist.
 
-## API Julia
+## Julia API
 
-`Sequence` è lo stesso tipo esportato da `ProfileAlignments`: gli allineamenti
-non copiano più ogni record tra due rappresentazioni del dominio. La traduzione
-tipizzata restituisce un solo tipo di risultato:
+`Sequence` is the same type exported by `ProfileAlignments`: alignments no
+longer copy each record between two domain representations. The typed
+translation returns a single result type:
 
 ```julia
 translation = find_translation(dna"ATGCCAGCA")
@@ -79,14 +80,14 @@ if !isnothing(translation)
 end
 ```
 
-`assess_structure` e `assess_asv` restituiscono rispettivamente
-`StructureAssessment` e `ASVAssessment`; le differenze amminoacidiche sono
-`MutationObservation`. Queste API compongono il calcolo in memoria senza creare
-tabelle intermedie. `check_asv_structure` e `calculate_asv_distance` conservano
-l'output tabellare per i report esistenti.
+`assess_structure` and `assess_asv` return `StructureAssessment` and
+`ASVAssessment` respectively; amino acid differences are `MutationObservation`
+values. These APIs compose the computation in memory without creating
+intermediate tables. `check_asv_structure` and `calculate_asv_distance` keep
+the tabular output for the existing reports.
 
-Le opzioni tassonomiche accettano `SpeciesRank`, `GenusRank` e `FamilyRank`.
-Una politica FI riutilizzabile si rappresenta con un valore immutabile:
+Taxonomic options accept `SpeciesRank`, `GenusRank` and `FamilyRank`.
+A reusable FI policy is represented by an immutable value:
 
 ```julia
 policy = ClassificationConfig(quality_threshold=0.995,
@@ -94,31 +95,31 @@ policy = ClassificationConfig(quality_threshold=0.995,
 verdicts = classify_asv("analysis", policy)
 ```
 
-Le funzioni che modificano file o cartelle terminano con `!`:
+Functions that modify files or directories end with `!`:
 `align_species_seq!`, `align_genus_seq!`, `align_family_seq!`, `re_align!`,
-`improve_alignment!`, `filter_divergent_seq!` e
-`asv_functional_structure!`. I nomi precedenti restano come adattatori per la
-compatibilità del codice esistente.
+`improve_alignment!`, `filter_divergent_seq!` and
+`asv_functional_structure!`. The previous names remain as adapters for
+compatibility with existing code.
 
-`filter_divergent_seq!` mostra l'avanzamento dei file e, ogni 5 secondi,
-dei confronti tra sequenze nel file corrente. Per visualizzarlo anche con
-`print_messages=false`, passare `show_progress=true`; la frequenza si regola
-con `progress_interval` (in secondi).
-Il calcolo delle distanze usa direttamente i byte delle sequenze ASCII, senza
-copie delle righe per ogni coppia, e precalcola gli estremi senza gap. Le sequenze
-identiche condividono i confronti, mantenendo tutti gli identificativi originali.
-Le distanze e le regole di eliminazione restano esatte, inclusi i casi senza
-sovrapposizione o con soli gap. Il guadagno aumenta in presenza di duplicati;
-con sequenze tutte diverse il numero massimo di confronti resta quadratico.
+`filter_divergent_seq!` reports progress over files and, every 5 seconds,
+over the sequence comparisons in the current file. To show it even with
+`print_messages=false`, pass `show_progress=true`; the frequency is set with
+`progress_interval` (in seconds).
+The distance computation works directly on the bytes of the ASCII sequences,
+without copying rows for each pair, and precomputes the gap-free ends. Identical
+sequences share their comparisons while keeping all the original identifiers.
+Distances and removal rules remain exact, including cases with no overlap or
+with gaps only. The gain grows with the number of duplicates; when all
+sequences differ, the maximum number of comparisons remains quadratic.
 
-Per elaborare tutte le famiglie senza scrivere cicli nello script:
+To process all families without writing loops in the script:
 
 ```julia
 species_bad = check_alignments!(; alignment_dir=reference_dir,
     tax_lev=SpeciesRank)
 isempty(species_bad) || improve_alignment!(species_bad)
 
-# Dopo la correzione vengono ricontrollate solo le famiglie modificate.
+# After the fix, only the modified families are checked again.
 species_still_bad = check_alignments!(; alignment_dir=reference_dir,
     tax_lev=SpeciesRank)
 
@@ -126,140 +127,140 @@ filter_divergent_references!(; alignment_dir=reference_dir,
     tax_lev=SpeciesRank, max_distance=0.10)
 ```
 
-Entrambe le funzioni scoprono le famiglie e saltano le cartelle prive di FASTA.
-`families=["FamilyA", "FamilyB"]` limita la selezione. `resume=true` (predefinito)
-riusa i risultati salvati in `alignment_dir/checkpoints` solo se nomi e contenuti
-SHA-256 dei file, parametri e versione dell'algoritmo coincidono. Anche nuovi
-download, file aggiunti o rimossi e riallineamenti invalidano i risultati quando
-cambia il contenuto. `resume=false` forza una nuova elaborazione.
+Both functions discover the families and skip directories without FASTA files.
+`families=["FamilyA", "FamilyB"]` restricts the selection. `resume=true`
+(default) reuses the results saved in `alignment_dir/checkpoints` only if the
+file names and SHA-256 contents, the parameters and the algorithm version all
+match. New downloads, added or removed files and realignments also invalidate
+the results when the content changes. `resume=false` forces a new run.
 
-Su un cluster, `align_species_seq!`, `align_genus_seq!`, `align_family_seq!`,
-`check_alignments!` e `filter_divergent_references!` accettano
-`shard_index` e `shard_count`. Le famiglie vengono ordinate e ripartite in modo
-deterministico, senza sovrapposizioni. Per esempio, un job array di 8 elementi
-usa `shard_index=task_id, shard_count=8`. I job possono condividere
-`alignment_dir`, perché ogni shard scrive famiglie e checkpoint distinti;
-download o elaborazioni non suddivise non devono essere avviati in parallelo
-sugli stessi file.
+On a cluster, `align_species_seq!`, `align_genus_seq!`, `align_family_seq!`,
+`check_alignments!` and `filter_divergent_references!` accept
+`shard_index` and `shard_count`. Families are sorted and partitioned
+deterministically, without overlaps. For example, an 8-element job array
+uses `shard_index=task_id, shard_count=8`. Jobs may share `alignment_dir`,
+because each shard writes distinct families and checkpoints; downloads or
+unsharded runs must not be started in parallel on the same files.
 
-`asv_functional_structure!` usa invece task dinamici entro il nodo e accetta
-`threads=:auto` oppure un limite intero. I calcoli delle ASV procedono in
-parallelo in batch limitati al numero di thread, mentre i report aggregati
-vengono composti nello stesso ordine dell'input.
-`check_alignments!` restituisce anche i percorsi problematici delle famiglie
-riutilizzate; supporta inoltre `GenusRank`, `FamilyRank` e `type="raw_sequences"`.
+`asv_functional_structure!` instead uses dynamic tasks within the node and
+accepts `threads=:auto` or an integer limit. ASV computations run in parallel
+in batches bounded by the number of threads, while the aggregated reports are
+assembled in the same order as the input.
+`check_alignments!` also returns the problematic paths of reused families;
+it additionally supports `GenusRank`, `FamilyRank` and `type="raw_sequences"`.
 
-Il filtro registra l'impronta dei file **dopo** la modifica e conserva nei
-checkpoint il resoconto delle sequenze eliminate. I report per famiglia sono
-scritti in `alignment_dir/logs/divergent_references/<livello>/<famiglia>.tsv`
-(personalizzabile con `log_dir`, oppure disattivabile con `log_dir=nothing`).
-Le riprese non duplicano le righe dei report. Gli output vengono preparati
-prima della sostituzione dei FASTA: una sostituzione interrotta puo essere
-completata al rilancio senza ripetere il filtro. Se l'interruzione avviene
-durante il calcolo, la famiglia in corso viene ricalcolata; quelle completate
-vengono riutilizzate. I file di preparazione restano disponibili in caso di
-interruzione. Il filtro opera sui file correnti: una soglia meno restrittiva
-non ripristina sequenze eliminate in precedenza; per questo serve rigenerare
-i riferimenti. `show_progress=false` disattiva i messaggi di avanzamento.
+The filter records the file fingerprints **after** modification and stores the
+summary of removed sequences in the checkpoints. Per-family reports are
+written to `alignment_dir/logs/divergent_references/<level>/<family>.tsv`
+(customisable with `log_dir`, or disabled with `log_dir=nothing`).
+Resumed runs do not duplicate report rows. Outputs are prepared before the
+FASTA files are replaced: an interrupted replacement can be completed on the
+next run without repeating the filter. If the interruption happens during the
+computation, the family in progress is recomputed; completed families are
+reused. Staging files remain available in case of interruption. The filter
+works on the current files: a less restrictive threshold does not restore
+previously removed sequences; to do that, regenerate the references.
+`show_progress=false` disables the progress messages.
 
-`align_species_seq!` mostra per impostazione predefinita le famiglie elaborate
-o riutilizzate, l'avanzamento delle pagine BOLD, il filtraggio e la specie
-in corso di allineamento con il numero di sequenze. Passare `show_progress=false`
-per disattivare questi messaggi; `progress_interval` regola gli aggiornamenti
-durante il filtraggio. I messaggi di allineamento sono emessi prima di ogni specie.
-Le specie indipendenti della stessa famiglia vengono allineate in batch con task
-del pacchetto separato `ProfileAlignments`; ogni batch è limitato al numero di
-thread disponibile per contenere la memoria ed evitare parallelismo annidato.
-Gli algoritmi di allineamento, i preset e le strutture numeriche restano nel
-pacchetto `ProfileAlignments`; AASV gestisce download, tassonomia e file.
+By default, `align_species_seq!` reports the families processed or reused,
+progress through BOLD pages, filtering, and the species being aligned with its
+number of sequences. Pass `show_progress=false` to disable these messages;
+`progress_interval` controls updates during filtering. Alignment messages are
+emitted before each species.
+Independent species of the same family are aligned in batches with tasks from
+the separate `ProfileAlignments` package; each batch is limited to the number
+of available threads to bound memory use and avoid nested parallelism.
+Alignment algorithms, presets and numerical structures live in the
+`ProfileAlignments` package; AASV handles downloads, taxonomy and files.
 
-`align_genus_seq!` e `align_family_seq!` mostrano famiglie e taxa elaborati o
-riutilizzati, il numero di sequenze nei profili da unire, le fusioni completate
-con la percentuale per il taxon corrente e il tempo finale. Gli aggiornamenti
-avvengono prima e dopo ogni fusione; `show_progress=false` li disattiva.
+`align_genus_seq!` and `align_family_seq!` report the families and taxa
+processed or reused, the number of sequences in the profiles to merge, the
+completed merges with the percentage for the current taxon, and the final time.
+Updates are emitted before and after each merge; `show_progress=false`
+disables them.
 
-## Funzioni convertite
+## Ported functions
 
-| Funzione | Operazione |
+| Function | Operation |
 |---|---|
-| `aa_similarity_matrix` | 4096 coppie di codoni con similarità Hamming |
-| `align_species_seq!` | download BOLD COI-5P, filtri, traduzione, allineamenti |
-| `align_genus_seq!`, `align_family_seq!` | fusione progressiva dei profili |
-| `check_alignment` | percorsi degli allineamenti con gap interni |
-| `check_alignments!` | controllo di tutte le famiglie con risultati persistenti |
-| `filter_divergent_references!` | filtro per famiglia con ripresa e report persistenti |
-| `re_align!` | riallineamento, opzionalmente dai FASTA originali |
-| `improve_alignment!` | rimozione iterativa di sequenze problematiche e log |
-| `filter_divergent_seq!` | filtro della distanza dal vicino più prossimo |
-| `asv_functional_structure!` | analisi delle ASV ai tre livelli tassonomici |
-| `classify_asv` | indice FI, classe, evidenze e metriche intermedie |
+| `aa_similarity_matrix` | 4096 codon pairs with Hamming similarity |
+| `align_species_seq!` | BOLD COI-5P download, filters, translation, alignments |
+| `align_genus_seq!`, `align_family_seq!` | progressive profile merging |
+| `check_alignment` | paths of alignments with internal gaps |
+| `check_alignments!` | check of all families with persistent results |
+| `filter_divergent_references!` | per-family filter with resume and persistent reports |
+| `re_align!` | realignment, optionally from the original FASTA files |
+| `improve_alignment!` | iterative removal of problematic sequences, with logs |
+| `filter_divergent_seq!` | nearest-neighbour distance filter |
+| `asv_functional_structure!` | ASV analysis at the three taxonomic levels |
+| `classify_asv` | FI index, class, evidence and intermediate metrics |
 
-Sono disponibili anche `read_fasta`, `write_fasta`, `best_translation`,
-`aa_table`, `align_sequences`, `align_profiles`, `calculate_asv_distance`,
-`get_hydro_metrics` e `check_asv_structure`. `?nome_funzione` visualizza
-la documentazione in Julia.
+Also available: `read_fasta`, `write_fasta`, `best_translation`, `aa_table`,
+`align_sequences`, `align_profiles`, `calculate_asv_distance`,
+`get_hydro_metrics` and `check_asv_structure`. `?function_name` shows the
+documentation in Julia.
 
-## Compatibilità e differenze
+## Compatibility and differences
 
-- La formula FI, i pesi (0.35/0.30/0.35), la soglia 0.90, il filtro qualità,
-  l'entropia normalizzata e lo sconto di conservazione `1-exp(-n_ref/20)`
-  seguono il codice R. Le distanze Grantham usano la tabella originale, non
-  un'approssimazione. L'idrofobicità usa la scala Kyte–Doolittle.
-- L'allineamento usa il pacchetto indipendente
-  [ProfileAlignments.jl](../ProfileAlignments.jl/README.md), installato come
-  progetto fratello e interamente Julia:
-  BLOSUM62, gap affini (`gap_open=-10`, `gap_extend=-1`), distanze k-mer,
-  albero guida, due passaggi progressivi e raffinamento iterativo.
-  I gap terminali sono gratuiti; le query ASV vengono inserite nel profilo
-  con `mode=:query`. `anchors=:fft` abilita l'accelerazione approssimata FFT,
-  mentre il default usa la programmazione dinamica completa.
-  Il precedente motore a penalità lineari è stato sostituito.
-  Non riproduce DECIPHER o MAFFT: coordinate, gap, mutazioni e FI possono
-  differire. La validazione biologica su benchmark reali resta necessaria.
-- `Sequence`, `best_translation` e le metriche proteiche accettano direttamente
-  i tipi BioSequences (`LongDNA`, `LongAA` e i literal `dna"..."`, `aa"..."`).
-  La pipeline converte una sola volta questi input nella codifica interna ASCII,
-  mantenendo compatibilità con i file e con l'API a stringhe.
-- Gli argomenti specifici di DECIPHER (per esempio `processors`,
-  `terminalGap`) non si trasferiscono direttamente; usare i parametri Julia
-  sopra elencati. Gli argomenti precedenti `match`, `mismatch` e `gap`
-  sono ancora accettati: `gap` imposta una penalità lineare.
-  La distanza di filtro è la frazione di residui differenti
-  nell'intersezione delle regioni coperte, escludendo i gap terminali.
-- Codici genetici incorporati: i 20 codici della tabella Biostrings usata
-  nel confronto R (1–6, 9–16, 21–26), senza reinterpretare i codoni
-  iniziali. Per altri codici passare un dizionario completo codone→aminoacido.
-  Le basi IUPAC traducibili senza ambiguità producono il residuo corrispondente;
-  altrimenti `X`. La traduzione cerca esclusivamente i tre frame forward,
-  ignora il codone terminale incompleto e non cerca il reverse complement.
-- I profili identici vengono deduplicati per l'analisi strutturale, come in R.
-  Nel ripristino di un allineamento interamente problematico, senza riferimento
-  esterno viene mantenuta deterministicamente la prima sequenza, mentre R
-  ne sceglie una casualmente.
-- BOLD viene letto con l'API paginata anche per famiglie piccole. I retry
-  mantengono lo stato del backoff; errori HTTP 4xx permanenti interrompono
-  subito il download. Un marker `.complete` evita che una cartella creata
-  durante un download fallito venga considerata completa. Le pagine scaricate
-  vengono salvate in `alignment_dir/bold_downloads/<famiglia>` solo dopo la
-  ricezione completa. Con `overwrite=false`, un rilancio riusa le pagine locali
-  e richiede solo quelle mancanti della stessa query; `overwrite=true` avvia
-  una nuova query senza mescolare pagine di download diversi. La cache viene
-  mantenuta anche dopo il completamento. Se BOLD non rende piu disponibile
-  la query salvata, occorre ripartire con `overwrite=true`. Per dati locali,
-  passare `records_provider=family -> records` a `align_species_seq`.
-- L'analisi registra anche confronti privi di mutazioni o con idrofobicità
-  non calcolabile, evitando di perdere ASV dai report. In assenza della
-  metrica idrofobica, il contributo FI è zero, come in R; il report contiene
-  `UNAVAILABLE`. Uno stop o un gap incompatibile produce il sentinel
-  `aa_pos=-1` e FI zero.
-- I report mantengono nomi e colonne principali della versione R.
-  `classify_asv` legge Excel o TSV. Il riesame della pipeline sostituisce
-  i report precedenti nella cartella `aa_structure_results`.
+- The FI formula, the weights (0.35/0.30/0.35), the 0.90 threshold, the quality
+  filter, the normalised entropy and the conservation discount
+  `1-exp(-n_ref/20)` follow the R code. Grantham distances use the original
+  table, not an approximation. Hydrophobicity uses the Kyte–Doolittle scale.
+- Alignment uses the independent
+  [ProfileAlignments.jl](../ProfileAlignments.jl/README.md) package, installed
+  as a sibling project and written entirely in Julia:
+  BLOSUM62, affine gaps (`gap_open=-10`, `gap_extend=-1`), k-mer distances,
+  guide tree, two progressive passes and iterative refinement.
+  Terminal gaps are free; ASV queries are inserted into the profile with
+  `mode=:query`. `anchors=:fft` enables the approximate FFT acceleration,
+  while the default uses full dynamic programming.
+  The previous linear-penalty engine has been replaced.
+  It does not reproduce DECIPHER or MAFFT: coordinates, gaps, mutations and FI
+  may differ. Biological validation on real benchmarks is still required.
+- `Sequence`, `best_translation` and the protein metrics accept BioSequences
+  types directly (`LongDNA`, `LongAA` and the `dna"..."`, `aa"..."` literals).
+  The pipeline converts these inputs once into the internal ASCII encoding,
+  keeping compatibility with the files and with the string API.
+- DECIPHER-specific arguments (for example `processors`, `terminalGap`) do not
+  carry over directly; use the Julia parameters listed above. The previous
+  arguments `match`, `mismatch` and `gap` are still accepted: `gap` sets a
+  linear penalty.
+  The filter distance is the fraction of differing residues in the
+  intersection of the covered regions, excluding terminal gaps.
+- Built-in genetic codes: the 20 codes of the Biostrings table used in the R
+  comparison (1–6, 9–16, 21–26), without reinterpreting start codons. For
+  other codes, pass a complete codon→amino acid dictionary.
+  IUPAC bases that translate unambiguously produce the corresponding residue;
+  otherwise `X`. Translation searches only the three forward frames, ignores
+  the incomplete terminal codon and does not search the reverse complement.
+- Identical profiles are deduplicated for the structural analysis, as in R.
+  When restoring an entirely problematic alignment without an external
+  reference, the first sequence is kept deterministically, whereas R picks
+  one at random.
+- BOLD is read through the paginated API, even for small families. Retries
+  keep the backoff state; permanent HTTP 4xx errors stop the download
+  immediately. A `.complete` marker prevents a directory created during a
+  failed download from being treated as complete. Downloaded pages are saved
+  to `alignment_dir/bold_downloads/<family>` only once fully received. With
+  `overwrite=false`, a rerun reuses the local pages and requests only the
+  missing pages of the same query; `overwrite=true` starts a new query without
+  mixing pages from different downloads. The cache is kept after completion.
+  If BOLD no longer serves the saved query, restart with `overwrite=true`.
+  For local data, pass `records_provider=family -> records` to
+  `align_species_seq`.
+- The analysis also records comparisons without mutations or whose
+  hydrophobicity cannot be computed, so no ASV is lost from the reports. When
+  the hydrophobicity metric is missing, its FI contribution is zero, as in R;
+  the report contains `UNAVAILABLE`. A stop codon or an incompatible gap
+  produces the sentinel `aa_pos=-1` and an FI of zero.
+- Reports keep the main names and columns of the R version.
+  `classify_asv` reads Excel or TSV. Re-running the pipeline replaces the
+  previous reports in the `aa_structure_results` directory.
 
-L'indice FI misura la compatibilità con l'evoluzione di COI funzionale;
-non è una probabilità né una diagnosi dell'origine NUMT/mitocondriale.
+The FI index measures compatibility with the evolution of functional COI;
+it is neither a probability nor a diagnosis of NUMT/mitochondrial origin.
 
-## Qualità delle letture con VSEARCH
+## Read quality with VSEARCH
 
 ```julia
 asv_functional_structure(asvs;
@@ -268,40 +269,42 @@ asv_functional_structure(asvs;
     trimmed_folder="trimmed", ee=40)
 ```
 
-I campioni sono selezionati dalle colonne numeriche con abbondanza >0,
-cercando il nome del campione nel nome del FASTQ. Sono supportati FASTQ
-non compressi (`.fastq`, `.fq`) con qualità Phred+33. Le probabilità di errore
-sono `10^(-Q/10)`; il filtro `ee` usa la loro somma e la qualità del codone
-è `1-somma(errori)` limitata a [0,1]. Gli errori di VSEARCH interrompono
-l'analisi. Il calcolo delle probabilità è testato localmente; l'integrazione
-con un eseguibile VSEARCH reale richiede la sua installazione.
+Samples are selected from the numeric columns with abundance >0, by looking
+for the sample name in the FASTQ file name. Uncompressed FASTQ files
+(`.fastq`, `.fq`) with Phred+33 qualities are supported. Error probabilities
+are `10^(-Q/10)`; the `ee` filter uses their sum, and codon quality is
+`1-sum(errors)` clamped to [0,1]. VSEARCH errors stop the analysis. The
+probability computation is tested locally; integration with a real VSEARCH
+executable requires installing it.
 
-## Verifiche locali
+## Local checks
 
-I test verificano FASTA, traduzione, gap, pulizia degli allineamenti,
-distanze, qualità Phred, FI, retry BOLD simulati e pipeline completa offline.
-Il confronto opzionale con R verifica ogni colonna numerica e la classe
-su otto scenari, oltre alla traduzione, all'idrofobicità e ai codici genetici:
+The tests cover FASTA, translation, gaps, alignment cleaning, distances, Phred
+quality, FI, simulated BOLD retries and the complete offline pipeline.
+The optional comparison with R checks every numeric column and the class
+across eight scenarios, as well as translation, hydrophobicity and genetic
+codes:
 
 ```powershell
 julia --project=. test/parity.jl 'C:\Program Files\R\R-4.5.0\bin\Rscript.exe'
 ```
 
-Questo controllo richiede R con `dplyr`, `readxl`, `Biostrings`, `Peptides`
-e i sorgenti originali sotto `reference/aasv` (o un percorso alternativo
-come secondo argomento). Il normale utilizzo e i test Julia non richiedono R.
-La CI inclusa esegue i test su Windows e Linux, Julia 1.10 e versione stabile.
-Il pacchetto di allineamento ha anche una propria suite, eseguibile da solo:
+This check requires R with `dplyr`, `readxl`, `Biostrings`, `Peptides` and the
+original sources under `reference/aasv` (or an alternative path as the second
+argument). Normal use and the Julia tests do not require R.
+The included CI runs the tests on Windows and Linux, with Julia 1.10 and the
+stable release. The alignment package also has its own suite, which can be
+run on its own:
 
 ```powershell
 julia --project=../ProfileAlignments.jl -e 'using Pkg; Pkg.test()'
 ```
 
-## Provenienza
+## Provenance
 
-Il porting deriva da [aasv](https://github.com/alexology/aasv), di Alex Laini,
-Samuele Voyron e Laura Gruppuso, distribuito con GPL >=2. Anche questo porting
-è distribuito con GPL >=2. La tabella Grantham proviene dal pacchetto
-[grantham](https://github.com/patterninstitute/grantham), licenza MIT;
-vedere `THIRD_PARTY_NOTICES.md`. Le copie dei repository originali in
-`reference/` sono materiale di confronto locale e sono escluse da Git.
+This port derives from [aasv](https://github.com/alexology/aasv), by Alex
+Laini, Samuele Voyron and Laura Gruppuso, distributed under GPL >=2. This port
+is also distributed under GPL >=2. The Grantham table comes from the
+[grantham](https://github.com/patterninstitute/grantham) package, MIT licence;
+see `THIRD_PARTY_NOTICES.md`. The copies of the original repositories in
+`reference/` are local comparison material and are excluded from Git.
