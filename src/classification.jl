@@ -131,9 +131,15 @@ function classify_asv(output_dir,config::ClassificationConfig)
             n1,n2,round_metric(codon),round_metric(penalty),join(parts,"; "),n,count(s->s.penalty>0,sites),
             isempty(refs) ? missing : Int(minimum(refs))))
     end
-    for row in eachrow(out)
-        other=filter(r->r.ASV_id==row.ASV_id && r.tax_lev!=row.tax_lev,eachrow(out))
-        isempty(other) || (row.Evidence*="; other levels: "*join(["$(r.tax_lev) FI = $(r.FI)" for r in other],"; "))
+    # Group rows by ASV once: scanning the whole table per row is quadratic.
+    rows_by_asv=Dict{String,Vector{Int}}()
+    for (i,id) in enumerate(out.ASV_id)
+        push!(get!(rows_by_asv,id,Int[]),i)
+    end
+    for rows in values(rows_by_asv), i in rows
+        other=[j for j in rows if out.tax_lev[j]!=out.tax_lev[i]]
+        isempty(other) || (out.Evidence[i]*="; other levels: "*
+            join(["$(out.tax_lev[j]) FI = $(out.FI[j])" for j in other],"; "))
     end
     out
 end

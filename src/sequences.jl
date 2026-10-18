@@ -12,10 +12,13 @@ struct Translation
 end
 
 const CODONS = [string(a,b,c) for a in "TCAG" for b in "TCAG" for c in "TCAG"]
+# Tables are baked in at precompilation; recompile whenever the data file changes.
+const GENETIC_CODES_PATH = joinpath(@__DIR__,"..","data","genetic_codes.tsv")
+include_dependency(GENETIC_CODES_PATH)
 const GENETIC_TABLES = Dict(begin
     id,aas=split(line,'\t')
     String(id)=>Dict(zip(CODONS,collect(aas)))
-end for line in readlines(joinpath(@__DIR__,"..","data","genetic_codes.tsv"))[2:end])
+end for line in readlines(GENETIC_CODES_PATH)[2:end])
 const IUPAC = Dict('A'=>"A", 'C'=>"C", 'G'=>"G", 'T'=>"T", 'N'=>"ACGT",
     'R'=>"AG", 'Y'=>"CT", 'S'=>"CG", 'W'=>"AT", 'K'=>"GT", 'M'=>"AC",
     'B'=>"CGT", 'D'=>"AGT", 'H'=>"ACT", 'V'=>"ACG")

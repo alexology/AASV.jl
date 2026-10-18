@@ -1,8 +1,10 @@
 const KYTE_DOOLITTLE = Dict(zip(collect("ACDEFGHIKLMNPQRSTVWY"),
     [1.8,2.5,-3.5,-3.5,2.8,-0.4,-3.2,4.5,-3.9,3.8,1.9,-3.5,-1.6,-3.5,-4.5,-0.8,-0.7,4.2,-0.9,-1.3]))
 const GRANTHAM_ORDER = collect("SRLPTAVGIF YCHQNKDEMW" |> s->replace(s," "=>""))
+const GRANTHAM_PATH = joinpath(@__DIR__,"..","data","grantham.csv")
+include_dependency(GRANTHAM_PATH)
 const GRANTHAM_MATRIX = let
-    rows = readlines(joinpath(@__DIR__,"..","data","grantham.csv"))[2:end]
+    rows = readlines(GRANTHAM_PATH)[2:end]
     reduce(vcat,[permutedims(parse.(Int,split(r,',')[2:end])) for r in rows])
 end
 
