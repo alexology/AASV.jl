@@ -3,6 +3,13 @@ import ProfileAlignments
 include("reference_checks.jl")
 include("divergent_distances.jl")
 
+@testset "Project file is portable" begin
+    # Pkg >= 1.11 copies the local ProfileAlignments path from the Manifest into
+    # Project.toml on add/rm/update; that path breaks installation elsewhere.
+    project=read(joinpath(pkgdir(AASV),"Project.toml"),String)
+    @test !occursin(r"(?m)^\[sources\]",project)
+end
+
 @testset "FASTA and translation" begin
     @test Sequence === ProfileAlignments.Sequence
     mktempdir() do dir
@@ -226,6 +233,12 @@ end
         @test revised.ASV_id==["ASV1","ASV2","ASV3"]
         v=classify_asv(output)
         @test nrow(v)==9
+        # Each row lists the other levels of the same ASV in table order.
+        for row in eachrow(v)
+            others=[r for r in eachrow(v) if r.ASV_id==row.ASV_id && r.tax_lev!=row.tax_lev]
+            @test endswith(row.Evidence,"; other levels: "*
+                join(["$(r.tax_lev) FI = $(r.FI)" for r in others],"; "))
+        end
         @test all(==(1),v.FI[v.ASV_id.=="ASV1"])
         @test all(==(0),v.FI[v.ASV_id.=="ASV3"])
         @test all(<(1),v.FI[v.ASV_id.=="ASV2"])
