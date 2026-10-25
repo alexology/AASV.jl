@@ -5,6 +5,10 @@ for the functional analysis of COI ASVs. The scientific formulas are compatible
 with R version 0.1.0, commit `9960347948da3142714deb656fcf38124b4e38d8`;
 the architecture uses Julia types, dispatch and conventions.
 
+This package is part of an experimental effort to use AI to port
+bioinformatics and quantitative ecology packages to Julia, with the goal of
+creating a unified environment for high performance scientific computing.
+
 Requires Julia 1.10 or later. Does not require R, Biostrings or DECIPHER.
 
 ```powershell
