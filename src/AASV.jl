@@ -1,7 +1,8 @@
 module AASV
 
 using CSV, DataFrames, HTTP, JSON3, SHA, Statistics, XLSX
-import BioSequences
+import BioSequences, FASTX
+using PrecompileTools: @setup_workload, @compile_workload
 import ProfileAlignments
 
 export Sequence, Alignment, ScoringModel, Translation, read_fasta, write_fasta,
@@ -15,7 +16,7 @@ export Sequence, Alignment, ScoringModel, Translation, read_fasta, write_fasta,
     align_species_seq, align_genus_seq, align_family_seq,
     align_species_seq!, align_genus_seq!, align_family_seq!, check_alignment,
     improve_alignment, improve_alignment!, filter_divergent_seq, select_shard,
-    check_alignments!, filter_divergent_references!,
+    check_alignments!, filter_divergent_references!, check_reference_records,
     filter_divergent_seq!, re_align, re_align!, asv_functional_structure,
     asv_functional_structure!, ClassificationConfig, classify_asv,
     align_sequences, align_profiles,
@@ -28,5 +29,6 @@ include("references.jl")
 include("reference_checks.jl")
 include("structure.jl")
 include("classification.jl")
+include("precompile.jl")
 
 end

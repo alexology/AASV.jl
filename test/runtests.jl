@@ -1,4 +1,4 @@
-using Test, AASV, BioSequences, DataFrames, CSV, XLSX, HTTP, JSON3, Statistics
+using Test, Logging, AASV, BioSequences, DataFrames, CSV, XLSX, HTTP, JSON3, Statistics
 import ProfileAlignments
 include("reference_checks.jl")
 include("divergent_distances.jl")
@@ -8,6 +8,29 @@ include("divergent_distances.jl")
     # Project.toml on add/rm/update; that path breaks installation elsewhere.
     project=read(joinpath(pkgdir(AASV),"Project.toml"),String)
     @test !occursin(r"(?m)^\[sources\]",project)
+end
+
+@testset "Parallel ASVs wait for every task" begin
+    @test AASV.fetch_all([Threads.@spawn i^2 for i in 1:5])==(1:5).^2
+    if Threads.nthreads()>1
+        # Task 1 fails at once, task 2 blocks: the caller must wait for it.
+        release=Channel{Nothing}(1)
+        finished=Threads.Atomic{Bool}(false)
+        caller=Threads.@spawn try
+            AASV.fetch_all([Threads.@spawn(error("failure at 1")),
+                Threads.@spawn begin take!(release); finished[]=true end])
+            nothing
+        catch e
+            e
+        end
+        sleep(0.5)
+        @test !istaskdone(caller)
+        put!(release,nothing)
+        err=fetch(caller)
+        @test finished[]
+        @test err isa TaskFailedException
+        @test occursin("failure at 1",sprint(showerror,err))
+    end
 end
 
 @testset "FASTA and translation" begin
@@ -249,6 +272,83 @@ end
         @test !isfile(joinpath(output,"aa_structure_results","ASV2_aa_structure.xlsx"))
         @test_throws ArgumentError asv_functional_structure(input;output_dir=output,
             alignment_dir=dir,threads=0)
+    end
+end
+
+@testset "References from earlier aasv versions" begin
+    mktempdir() do dir
+        fasta(path,records)=(mkpath(dirname(path)); write(path,join([">$id\n$s\n" for (id,s) in records])))
+        repeated=joinpath(dir,"repeated.fasta")
+        fasta(repeated,["a"=>"MA","b"=>"MC","a"=>"MA"])
+        loaded=AASV.read_references(repeated)
+        @test [r.id for r in loaded.records]==["a","b"] && loaded.repeats==1
+        fasta(repeated,["a"=>"MA","a"=>"MC"])
+        @test_throws ArgumentError AASV.read_references(repeated)
+
+        # Earlier aasv versions put Genusother species in the Genus profile and
+        # repeated whole records in family profiles.
+        nt=joinpath(dir,"raw_sequences_nt","Family","species")
+        foreign_dna="ATGGCTGCTGCTGATGCTGCTGCTGCTGCT"
+        fasta(joinpath(nt,"Genus_a.fasta"),["Genus_a__1"=>DEMO_DNA,"Genus_a__2"=>DEMO_DNA])
+        fasta(joinpath(nt,"Genusother_b.fasta"),["Genusother_b__3"=>foreign_dna])
+        aln=joinpath(dir,"alignments","Family")
+        fasta(joinpath(aln,"species","Genus_a.fasta"),["Genus_a__1"=>"MAAAAAAAA","Genus_a__2"=>"MAAAAAAAA"])
+        fasta(joinpath(aln,"genus","Genus.fasta"),["Genus_a__1"=>"MAAA-AAAAA",
+            "Genus_a__2"=>"MAAA-AAAAA","Genusother_b__3"=>"MAAADAAAAA"])
+        fasta(joinpath(aln,"family","Family.fasta"),["Genus_a__1"=>"MAAA-AAAAA",
+            "Genus_a__2"=>"MAAA-AAAAA","Genusother_b__3"=>"MAAADAAAAA","Genus_a__1"=>"MAAA-AAAAA"])
+        refs=@test_logs (:warn,r"without a nucleotide reference") AASV.taxon_references(
+            joinpath(aln,"genus","Genus.fasta"),[joinpath(nt,"Genus_a.fasta")])
+        @test [r.sequence for r in refs.refs]==["MAAAAAAAA","MAAAAAAAA"]
+
+        input=DataFrame(family=fill("Family",2),genus=fill("Genus",2),species=fill("Genus a",2),
+            ASV=["ATGGCTGCTGATGCTGCTGCTGCTGCT","ATGGCTGCTGATGCTGCTGCTGCTGCT"],sample1=[3,2])
+        output=joinpath(dir,"results")
+        # Each file is checked once, although both ASVs use it.
+        @test_logs (:warn,r"without a nucleotide reference") (:warn,r"Exact repeats") min_level=Logging.Warn asv_functional_structure!(
+            input;output_dir=output,alignment_dir=dir,threads=1)
+        aa=DataFrame(XLSX.readtable(joinpath(output,"aa_structure_results","ASV1_aa_structure.xlsx"),1))
+        genus=aa[aa.tax_lev.=="genus",:]
+        # Without the Genusother record, D is novel within the genus.
+        @test genus.aa_pos==[4] && genus.illegal_aa==["D"] && genus.ref_id==["Genus_a__1"]
+
+        issues=check_reference_records(;alignment_dir=dir)
+        @test Tuple.(eachrow(issues[:,[:tax_lev,:record,:issue]]))==[("genus","Genusother_b__3","no_nucleotide_reference"),
+            ("family","Genus_a__1","repeated")]
+        @test nrow(check_reference_records(;alignment_dir=dir,tax_lev=SpeciesRank))==0
+        @test_logs (:warn,r"Exact repeats") check_alignment("Family";alignment_dir=dir,tax_lev=FamilyRank)
+
+        # Rebuilding the family keeps a species found in two genus profiles once.
+        fasta(joinpath(aln,"genus","Genusother.fasta"),["Genusother_b__3"=>"MAAADAAAAA"])
+        @test_logs (:warn,r"repeated across reference profiles") min_level=Logging.Warn align_family_seq!(
+            ;alignment_dir=dir,overwrite=true,show_progress=false,remove_gap_causing=false)
+        family=read_fasta(joinpath(aln,"family","Family.fasta"))
+        @test sort([r.id for r in family])==["Genus_a__1","Genus_a__2","Genusother_b__3"]
+        @test isempty(check_reference_records(;alignment_dir=dir,tax_lev=FamilyRank))
+    end
+end
+
+@testset "Gap-causing records in merged profiles" begin
+    mktempdir() do dir
+        species=joinpath(dir,"alignments","Family","species")
+        mkpath(species)
+        plain="MKLVFSTGHRDEQNPYC"
+        for (name,aa) in (("Genus_a",plain),("Genus_b",plain),("Genus_c",plain),("Genus_ins","MKLVFSTGWWWHRDEQNPYC"))
+            write_fasta([Sequence(name*"__1",aa)],joinpath(species,name*".fasta"))
+        end
+        align_genus_seq!(;alignment_dir=dir,show_progress=false,remove_gap_causing=false)
+        @test length(read_fasta(joinpath(dir,"alignments","Family","genus","Genus.fasta")))==4
+        @test_logs (:info,r"removed gap-causing") match_mode=:any align_genus_seq!(;alignment_dir=dir,overwrite=true)
+        genus=read_fasta(joinpath(dir,"alignments","Family","genus","Genus.fasta"))
+        @test sort([r.id for r in genus])==["Genus_a__1","Genus_b__1","Genus_c__1"]
+        @test all(r->r.sequence==plain,genus)
+        report=CSV.read(joinpath(dir,"logs","gap_causing_references","genus","Family","Genus.tsv"),DataFrame;delim='\t')
+        @test report.sequence==["Genus_ins__1"] && report.n_start==[4] && report.n_retained==[3]
+        # A rebuild without removals drops the stale report.
+        rm(joinpath(species,"Genus_ins.fasta"))
+        align_genus_seq!(;alignment_dir=dir,overwrite=true,show_progress=false)
+        @test !isfile(joinpath(dir,"logs","gap_causing_references","genus","Family","Genus.tsv"))
+        @test AASV.prune_gap_causing([Sequence("x","MA-A"),Sequence("y","MAWA")]).removed==Sequence[]
     end
 end
 

@@ -81,11 +81,17 @@ function check_alignment(taxon; alignment_dir=pwd(), type="alignments", tax_lev=
     files = fasta_files(joinpath(alignment_dir,type,safe_name(taxon),tax_lev))
     isempty(files) && throw(ArgumentError("No FASTA files in specified directory"))
     filter(files) do path
-        records = read_fasta(path)
+        records = read_reference_records(path)
         length(records)>1 && any(inner_gaps(alignment_matrix(records)))
     end
 end
 
+"""Realign FASTA alignments in place, without their gaps. With `raw_sequences=true`,
+species alignments are rebuilt from `raw_sequences`, as in R aasv: this resets
+the curation, restoring records removed by `improve_alignment!` or
+`filter_divergent_seq!`. To rebuild species references, use
+`align_species_seq!(overwrite=true)`.
+"""
 function re_align!(paths; raw_sequences=false, verbose=true, kwargs...)
     for path in paths
         if raw_sequences
@@ -95,7 +101,7 @@ function re_align!(paths; raw_sequences=false, verbose=true, kwargs...)
         else
             source = path
         end
-        write_fasta(align_sequences(read_fasta(source);kwargs...),path)
+        write_fasta(align_sequences(read_reference_records(source);kwargs...),path)
         verbose && @info "Realigned" path
     end
     paths
@@ -127,7 +133,7 @@ reference breaks the tie; without one, retain the first candidate deterministica
 """
 function improve_alignment!(paths; print_messages=true, log_dir=nothing, kwargs...)
     for path in paths
-        original = read_fasta(path)
+        original = read_reference_records(path)
         isempty(original) && continue
         raw = [Sequence(r.id,replace(r.sequence,"-"=>"")) for r in original]
         reps = unique(r->r.sequence,raw)
@@ -142,7 +148,7 @@ function improve_alignment!(paths; print_messages=true, log_dir=nothing, kwargs.
                 siblings = filter(p->p!=path && startswith(basename(p),genus*"_"),fasta_files(dirname(path)))
                 winner = 1
                 if !isempty(siblings)
-                    refs = read_fasta(first(siblings))
+                    refs = read_reference_records(first(siblings))
                     if !isempty(refs)
                         ref = Sequence("__external_reference__",replace(first(refs).sequence,"-"=>""))
                         counts = [count(==('-'), first(align_sequences([Sequence(r.id,replace(r.sequence,"-"=>"")),ref];kwargs...)).sequence) for r in aligned]
@@ -278,7 +284,7 @@ function filter_divergent_seq!(paths; max_distance=0.10, min_seqs=4, print_messa
             @info "Divergent sequence filter: file" file=file_index total_files=total path
             last_report = time()
         end
-        records = read_fasta(path)
+        records = read_reference_records(path)
         n = length(records)
         n<max(2,min_seqs) && continue
         progress=function(comparisons,total_comparisons,unique_sequences)

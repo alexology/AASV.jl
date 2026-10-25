@@ -5,6 +5,53 @@ const ScoringModel = ProfileAlignments.ScoringModel
 const read_fasta = ProfileAlignments.read_fasta
 const write_fasta = ProfileAlignments.write_fasta
 
+# FASTA entries in file order, without the unique-ID check of `read_fasta`.
+function fasta_entries(path::AbstractString)
+    entries=Pair{String,String}[]
+    reader=FASTX.FASTAReader(open(path);copy=false)
+    try
+        for rec in reader
+            push!(entries,String(strip(FASTX.description(rec)))=>FASTX.sequence(String,rec))
+        end
+    catch e
+        e isa ErrorException || e isa EOFError || rethrow()
+        throw(ArgumentError("Invalid FASTA $path: $(sprint(showerror,e))"))
+    finally
+        close(reader)
+    end
+    entries
+end
+
+"""Read reference FASTA records, dropping exact repeats of a record (same ID and
+sequence) and returning `(records, repeats)`. Reference sets built by earlier aasv
+versions can repeat whole records; a repeated ID with a different sequence is
+ambiguous and raises `ArgumentError`.
+"""
+function read_references(path::AbstractString)
+    records=Sequence[]
+    seen=Dict{String,String}()
+    repeats=0
+    for (id,sequence) in fasta_entries(path)
+        previous=get(seen,id,nothing)
+        if isnothing(previous)
+            seen[id]=sequence
+            push!(records,Sequence(id,sequence))
+        elseif previous==sequence
+            repeats+=1
+        else
+            throw(ArgumentError("Reference ID $id is repeated with a different sequence in $path"))
+        end
+    end
+    (records=records,repeats=repeats)
+end
+
+"""Reference records of one file; exact repeats are ignored with a warning."""
+function read_reference_records(path::AbstractString)
+    loaded=read_references(path)
+    loaded.repeats>0 && @warn "Exact repeats of reference records were ignored" path repeats=loaded.repeats
+    loaded.records
+end
+
 """A stop-free forward translation and its one-based reading frame."""
 struct Translation
     amino_acids::String

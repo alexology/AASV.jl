@@ -232,7 +232,8 @@ function assess_asv(;query_dna,query_id,ref_aa_aligned,ref_nt,
         end
     end
     nt_lookup=Dict(r.id=>r.sequence for r in ref_nt)
-    ref_translations=Dict(r.id=>find_translation(r.sequence;genetic_code) for r in ref_nt)
+    # Only references at novel residues are translated, not the whole taxon.
+    ref_translations=Dict{String,Union{Nothing,Translation}}()
     illegal=[j for j in covered if !(q[j] in refmat[:,j])]
     qualities=Vector{Vector{Float64}}()
     if !isnothing(vsearch_path)
@@ -250,7 +251,7 @@ function assess_asv(;query_dna,query_id,ref_aa_aligned,ref_nt,
             c=refmat[i,j]
             c=='-' && continue
             haskey(nt_lookup,r.id) || throw(ArgumentError("Missing nucleotide reference for $(r.id)"))
-            ref_translation=ref_translations[r.id]
+            ref_translation=get!(()->find_translation(nt_lookup[r.id];genetic_code),ref_translations,r.id)
             isnothing(ref_translation) && throw(ArgumentError("Reference $(r.id) has no valid translation"))
             k=count(!=('-'),refmat[i,1:j])
             start=ref_translation.frame+3*(k-1)
@@ -272,6 +273,35 @@ end
 
 """Tabular compatibility adapter for `assess_asv`, used by report writers."""
 calculate_asv_distance(;kwargs...)=assessment_tables(assess_asv(;kwargs...))
+
+# Nucleotide reference files of the species in a taxon.
+taxon_nt_paths(nt_dir,level,name)=level=="species" ? filter(isfile,[joinpath(nt_dir,name*".fasta")]) :
+    level=="genus" ? filter(p->startswith(basename(p),name*"_"),fasta_files(nt_dir)) : fasta_files(nt_dir)
+
+"""Load a taxon profile and its nucleotide references once per run.
+Profile records need their nucleotide reference to report codons. Records
+without one, such as other genera in genus files of earlier aasv versions or
+altered IDs, are excluded with a warning; gap-only columns are then removed.
+"""
+function taxon_references(aa_path,nt_paths)
+    loaded=read_references(aa_path)
+    nt=Sequence[]
+    repeats=loaded.repeats
+    for path in nt_paths
+        x=read_references(path)
+        append!(nt,x.records)
+        repeats+=x.repeats
+    end
+    repeats>0 && @warn "Exact repeats of reference records were ignored" path=aa_path repeats
+    ids=Set(r.id for r in nt)
+    refs=filter(r->r.id in ids,loaded.records)
+    if length(refs)<length(loaded.records)
+        excluded=[r.id for r in loaded.records if !(r.id in ids)]
+        @warn "Profile records without a nucleotide reference in the taxon were excluded" path=aa_path excluded=length(excluded) examples=first(excluded,5)
+        isempty(refs) || (refs=trim_columns(refs))
+    end
+    (refs=refs,nt=nt)
+end
 
 function add_metadata(df,row,level)
     out=copy(df)
@@ -313,6 +343,14 @@ function asv_functional_structure!(asv_taxonomy;output_dir,alignment_dir,vsearch
     all_hydro=DataFrame(ASV_id=String[],tax_lev=String[],species=Union{Missing,String}[],
         global_min=Union{Missing,Float64}[],global_max=Union{Missing,Float64}[],global_score=Union{Missing,Float64}[],
         global_pass=Union{Missing,Bool}[],local_violation_rate=Union{Missing,Float64}[],structural_verdict=String[])
+    # ASVs of a taxon share its references: load, check and warn once per file.
+    # A family's references are released after its last ASV.
+    references=Dict{String,Dict{String,NamedTuple}}()
+    references_lock=ReentrantLock()
+    load_references(family,aa_path,nt_paths)=lock(references_lock) do
+        get!(()->taxon_references(aa_path,nt_paths),get!(Dict{String,NamedTuple},references,family),aa_path)
+    end
+    last_row=Dict(safe_name(string(f))=>i for (i,f) in enumerate(df.family) if !ismissing(f))
     function process_asv(row_index)
         row=df[row_index,:]
         ismissing(row.family) && return (hydro=DataFrame(),aa=DataFrame())
@@ -327,12 +365,10 @@ function asv_functional_structure!(asv_taxonomy;output_dir,alignment_dir,vsearch
             ismissing(name) && continue
             name=safe_name(replace(string(name)," "=>"_"))
             aa_path=joinpath(alignment_dir,"alignments",family,level,name*".fasta")
-            nt_paths=level=="species" ? filter(isfile,[joinpath(nt_dir,name*".fasta")]) :
-                level=="genus" ? filter(p->startswith(basename(p),name*"_"),fasta_files(nt_dir)) : fasta_files(nt_dir)
+            nt_paths=taxon_nt_paths(nt_dir,level,name)
             (!isfile(aa_path) || isempty(nt_paths)) && continue
-            refs=read_fasta(aa_path)
+            refs,nt=load_references(family,aa_path,nt_paths)
             isempty(refs) && continue
-            nt=reduce(vcat,read_fasta.(nt_paths);init=Sequence[])
             result=calculate_asv_distance(;query_dna=row.ASV,query_id=row.ASV_id,ref_aa_aligned=refs,ref_nt=nt,
                 output_dir,tax_lev=level,genetic_code,hydro_threshold,hydro_window,vsearch_path,trimmed_folder,
                 asv_samples=present,ee,kwargs...)
@@ -346,7 +382,7 @@ function asv_functional_structure!(asv_taxonomy;output_dir,alignment_dir,vsearch
     for batch_start in 1:thread_budget:nrow(df)
         indices=batch_start:min(batch_start+thread_budget-1,nrow(df))
         results = if thread_budget>1 && length(indices)>1
-            fetch.([Threads.@spawn process_asv(i) for i in indices])
+            fetch_all([Threads.@spawn process_asv(i) for i in indices])
         else
             [process_asv(i) for i in indices]
         end
@@ -354,8 +390,24 @@ function asv_functional_structure!(asv_taxonomy;output_dir,alignment_dir,vsearch
             append!(all_hydro,result.hydro;cols=:union)
             isempty(result.aa) || write_table(joinpath(resultdir,df.ASV_id[i]*"_aa_structure.xlsx"),result.aa)
         end
+        filter!(((family,_),)->last_row[family]>last(indices),references)
     end
     write_table(joinpath(resultdir,"hydrophobicity.xlsx"),all_hydro)
     df
 end
 asv_functional_structure(args...;kwargs...)=asv_functional_structure!(args...;kwargs...)
+
+# Wait for every task before rethrowing the first failure (in task order), so no
+# task still writes reports after the caller has seen the error.
+function fetch_all(tasks)
+    failure=nothing
+    for t in tasks
+        try
+            wait(t)
+        catch e
+            isnothing(failure) && (failure=e)
+        end
+    end
+    isnothing(failure) || throw(failure)
+    fetch.(tasks)
+end

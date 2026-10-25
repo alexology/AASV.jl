@@ -40,7 +40,9 @@ function write_json_checkpoint(path, value)
     try
         JSON3.write(io,value)
         close(io)
-        mv(temporary,path;force=true)
+        # A single rename replaces the file atomically; mv(force=true) could
+        # remove the old checkpoint and then fail to move the new one.
+        Base.Filesystem.rename(temporary,path)
     finally
         isopen(io) && close(io)
         isfile(temporary) && rm(temporary)
@@ -229,8 +231,31 @@ function align_species_seq!(taxonomy; alignment_dir=pwd(), overwrite=false,
 end
 align_species_seq(args...;kwargs...)=align_species_seq!(args...;kwargs...)
 
+# Records with insertions open columns that are gaps in most references; a
+# query is then flagged as an indel against the whole profile. Remove them
+# iteratively, unless every record is flagged.
+function prune_gap_causing(records)
+    removed=Sequence[]
+    while length(records)>1
+        bad=causes_internal_gaps(alignment_matrix(records))
+        (any(bad) && !all(bad)) || break
+        append!(removed,records[bad])
+        records=trim_columns(records[.!bad])
+    end
+    (records=records,removed=removed)
+end
+
+function write_gap_causing_report(path, n_start, records, removed)
+    rm(path;force=true)
+    isempty(removed) && return
+    mkpath(dirname(path))
+    CSV.write(path,DataFrame(sequence=[r.id for r in removed],n_start=fill(n_start,length(removed)),
+        n_retained=fill(length(records),length(removed)));delim='	')
+end
+
 function merge_reference_level(level; taxon=nothing, alignment_dir=pwd(), overwrite=false,
-                               show_progress=true, shard_index=1, shard_count=1, kwargs...)
+                               show_progress=true, shard_index=1, shard_count=1,
+                               remove_gap_causing=true, log_dir=joinpath(alignment_dir,"logs"), kwargs...)
     level=rank_name(parse_rank(level))
     base=joinpath(alignment_dir,"alignments")
     families=isnothing(taxon) ? (isdir(base) ? filter(f->isdir(joinpath(base,f)),readdir(base)) : String[]) :
@@ -259,13 +284,29 @@ function merge_reference_level(level; taxon=nothing, alignment_dir=pwd(), overwr
             end
             taxon_started=time()
             show_progress && @info "Reference profiles: loading taxon" level family taxon=name taxon_index total_taxa=length(names) files=length(groups[name])
-            blocks=read_fasta.(groups[name])
+            blocks=read_reference_records.(groups[name])
+            sort!(blocks;by=length,rev=true,alg=MergeSort)
+            # Earlier aasv versions could place a species in two genus profiles;
+            # its records are kept once, in the largest profile.
+            seen=Dict{String,String}()
+            repeats=0
+            blocks=map(blocks) do block
+                kept=filter(block) do r
+                    raw=replace(r.sequence,"-"=>"")
+                    previous=get(seen,r.id,nothing)
+                    isnothing(previous) && (seen[r.id]=raw; return true)
+                    previous==raw || throw(ArgumentError("Reference ID $(r.id) has different sequences in the $name profiles"))
+                    false
+                end
+                repeats+=length(block)-length(kept)
+                length(kept)<length(block) ? trim_columns(kept) : block
+            end
+            repeats>0 && @warn "Records repeated across reference profiles were merged once" level family taxon=name repeats
             filter!(!isempty,blocks)
             if isempty(blocks)
                 show_progress && @info "Reference profiles: no usable profiles" level family taxon=name
                 continue
             end
-            sort!(blocks;by=length,rev=true,alg=MergeSort)
             merges_done=0
             total_merges=length(blocks)-1
             result=reduce(blocks) do a,b
@@ -274,6 +315,13 @@ function merge_reference_level(level; taxon=nothing, alignment_dir=pwd(), overwr
                 merges_done+=1
                 show_progress && @info "Reference profiles: merge completed" level family taxon=name merges_done total_merges percent=round(100*merges_done/total_merges;digits=1)
                 merged
+            end
+            if remove_gap_causing
+                n_start=length(result)
+                result,removed=prune_gap_causing(result)
+                isnothing(log_dir) || write_gap_causing_report(joinpath(log_dir,"gap_causing_references",
+                    level,family,name*".tsv"),n_start,result,removed)
+                show_progress && !isempty(removed) && @info "Reference profiles: removed gap-causing records" level family taxon=name removed=length(removed) retained=length(result)
             end
             write_fasta(result,dest)
             completed+=1
@@ -287,11 +335,25 @@ end
 
 """Merge species profiles into genus FASTA alignments, largest profile first.
 `show_progress=true` reports families, taxa and each profile merge.
+After merging, records whose insertions open gap columns in most references
+are removed iteratively (`remove_gap_causing=true`; R aasv relies on
+`check_alignment` and `improve_alignment` at each level), and listed
+in `log_dir/gap_causing_references/<level>/<family>/<taxon>.tsv`
+(`log_dir=nothing` disables the report). Otherwise a few such records make
+every query an indel at that level. Existing profiles are reused unless
+`overwrite=true`.
 """
 align_genus_seq!(;kwargs...) = merge_reference_level(GenusRank;kwargs...)
 align_genus_seq(;kwargs...) = align_genus_seq!(;kwargs...)
 """Merge genus profiles into family FASTA alignments, largest profile first.
 `show_progress=true` reports families, taxa and each profile merge.
+After merging, records whose insertions open gap columns in most references
+are removed iteratively (`remove_gap_causing=true`; R aasv relies on
+`check_alignment` and `improve_alignment` at each level), and listed
+in `log_dir/gap_causing_references/<level>/<family>/<taxon>.tsv`
+(`log_dir=nothing` disables the report). Otherwise a few such records make
+every query an indel at that level. Existing profiles are reused unless
+`overwrite=true`.
 """
 align_family_seq!(;kwargs...) = merge_reference_level(FamilyRank;kwargs...)
 align_family_seq(;kwargs...) = align_family_seq!(;kwargs...)

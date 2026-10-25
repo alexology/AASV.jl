@@ -49,6 +49,8 @@ end
 
 align_genus_seq!(; alignment_dir="references")
 align_family_seq!(; alignment_dir="references")
+# Records whose insertions open gap columns in most of the merged profile
+# are removed and listed in references/logs/gap_causing_references.
 
 asvs = CSV.read("asvs.csv", DataFrame)
 # Required columns: family, genus, species, ASV (DNA sequence).
@@ -58,6 +60,18 @@ revised = asv_functional_structure!(asvs;
 verdicts = classify_asv("analysis")
 CSV.write("classification.csv", verdicts)
 ```
+
+`align_genus_seq!` and `align_family_seq!` remove, after each merge, the
+records whose insertions open columns that are gaps in most references
+(`remove_gap_causing=true`). R aasv merges without this step and relies on
+`check_alignment` and `improve_alignment` at each level; `false` reproduces
+its merges. A few such records otherwise make every query an indel at that
+level: on 9,768 Scarabaeidae references, 44 records (0.45%) made all 34
+tested ASVs `INVALID_ORF` at family level; with the removal the results
+matched those obtained with the R references.
+
+The package precompiles a small offline analysis, so the first call of
+`asv_functional_structure!` in a session does not wait for compilation.
 
 Julia options are passed after `;`. Missing statistical values use `missing`;
 an absent result or option uses `nothing`. CSV, Excel and `DataFrame` are
@@ -146,6 +160,31 @@ unsharded runs must not be started in parallel on the same files.
 accepts `threads=:auto` or an integer limit. ASV computations run in parallel
 in batches bounded by the number of threads, while the aggregated reports are
 assembled in the same order as the input.
+Each reference profile and its nucleotide references are read once per run
+and released after the last ASV of the family; reference codons are
+translated only at novel residues.
+
+`asv_functional_structure!` also reads reference sets built by earlier aasv
+versions. Exact repeats of a record (same ID and sequence) are ignored; an ID
+repeated with a different sequence is an error. Profile records without a
+nucleotide reference in the taxon cannot be checked codon by codon and are
+excluded, together with the columns left with gaps only. This removes, for
+example, the `Canthonidia` species that an earlier R version merged into the
+`Canthon` genus profile. Both cases are reported once per file with a warning. The other functions
+that read references (`check_alignment`, `improve_alignment!`, `re_align!`,
+`filter_divergent_seq!` and the genus/family merges) also ignore exact
+repeats, and a family merge keeps a species found in two genus profiles once.
+`check_reference_records(; alignment_dir)` lists these records in a table
+before an analysis:
+
+```julia
+issues = check_reference_records(; alignment_dir="references")
+```
+
+Genus and family profiles can be rebuilt with `overwrite=true`. Species
+alignments with altered IDs need `align_species_seq!(overwrite=true)`:
+realigning them from `raw_sequences` would restore records removed by earlier
+curation.
 `check_alignments!` also returns the problematic paths of reused families;
 it additionally supports `GenusRank`, `FamilyRank` and `type="raw_sequences"`.
 

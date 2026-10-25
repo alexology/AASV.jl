@@ -81,7 +81,8 @@ function install_reference_filter!(pending, directory, stage)
         close(io)
         try
             cp(joinpath(stage,name),temporary;force=true)
-            mv(temporary,path;force=true)
+            # Atomic replacement: on failure the previous file stays in place.
+            Base.Filesystem.rename(temporary,path)
         finally
             isfile(temporary) && rm(temporary)
         end
@@ -172,4 +173,41 @@ function filter_divergent_references!(; alignment_dir=pwd(), tax_lev=SpeciesRank
         show_progress && @info "Reference divergence filter: family completed" family index total=length(selected) reused
     end
     result
+end
+
+"""Report reference records that `asv_functional_structure!` ignores or excludes.
+Returns a table with `family`, `tax_lev`, `file`, `record` and `issue`:
+`"repeated"` (exact repeat of a record), `"conflicting"` (ID repeated with
+another sequence; analyses stop on it) or `"no_nucleotide_reference"` (profile
+record without a nucleotide reference in the taxon, such as another genus in a
+genus profile or an altered ID written by an earlier aasv version).
+Genus and family profiles can be rebuilt with `overwrite=true`. Realigning
+species files from the raw sequences would restore records removed by earlier
+curation; rebuild them with `align_species_seq!(overwrite=true)` instead.
+"""
+function check_reference_records(; alignment_dir=pwd(), families=nothing,
+                                 tax_lev=(SpeciesRank,GenusRank,FamilyRank))
+    ranks=tax_lev isa Union{TaxonomicRank,Symbol,AbstractString} ? [tax_lev] : collect(tax_lev)
+    levels=[rank_name(parse_rank(rank)) for rank in ranks]
+    out=DataFrame(family=String[],tax_lev=String[],file=String[],record=String[],issue=String[])
+    for family in reference_families(alignment_dir,"alignments",families)
+        nt_dir=joinpath(alignment_dir,"raw_sequences_nt",family,"species")
+        nt_ids=Dict(path=>Set(first.(fasta_entries(path))) for path in fasta_files(nt_dir))
+        for level in levels, path in fasta_files(joinpath(alignment_dir,"alignments",family,level))
+            name=splitext(basename(path))[1]
+            ids=reduce(union,(nt_ids[p] for p in taxon_nt_paths(nt_dir,level,name));init=Set{String}())
+            seen=Dict{String,String}()
+            for (id,sequence) in fasta_entries(path)
+                previous=get(seen,id,nothing)
+                issue=if isnothing(previous)
+                    seen[id]=sequence
+                    id in ids ? nothing : "no_nucleotide_reference"
+                else
+                    previous==sequence ? "repeated" : "conflicting"
+                end
+                isnothing(issue) || push!(out,(family,level,path,id,issue))
+            end
+        end
+    end
+    out
 end
