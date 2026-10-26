@@ -33,6 +33,13 @@ function make_retry_performer(; initial_wait=60.0, max_wait=7200.0, max_attempts
     end
 end
 
+# Unlike Filesystem.rename on Julia 1.10, never fall back to copying/removing.
+function rename_atomic(source::AbstractString, destination::AbstractString)
+    err = ccall(:jl_fs_rename, Int32, (Cstring, Cstring), source, destination)
+    err < 0 && Base.uv_error("rename($(repr(source)), $(repr(destination)))", err)
+    nothing
+end
+
 """Write a checkpoint only after its entire JSON payload is on disk."""
 function write_json_checkpoint(path, value)
     mkpath(dirname(path))
@@ -42,7 +49,7 @@ function write_json_checkpoint(path, value)
         close(io)
         # A single rename replaces the file atomically; mv(force=true) could
         # remove the old checkpoint and then fail to move the new one.
-        Base.Filesystem.rename(temporary,path)
+        rename_atomic(temporary,path)
     finally
         isopen(io) && close(io)
         isfile(temporary) && rm(temporary)

@@ -2,6 +2,7 @@ using Test, Logging, AASV, BioSequences, DataFrames, CSV, XLSX, HTTP, JSON3, Sta
 import ProfileAlignments
 include("reference_checks.jl")
 include("divergent_distances.jl")
+include("atomic_publication.jl")
 
 @testset "Project file is portable" begin
     # Pkg >= 1.11 copies the local ProfileAlignments path from the Manifest into

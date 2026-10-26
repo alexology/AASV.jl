@@ -82,7 +82,7 @@ function install_reference_filter!(pending, directory, stage)
         try
             cp(joinpath(stage,name),temporary;force=true)
             # Atomic replacement: on failure the previous file stays in place.
-            Base.Filesystem.rename(temporary,path)
+            rename_atomic(temporary,path)
         finally
             isfile(temporary) && rm(temporary)
         end
